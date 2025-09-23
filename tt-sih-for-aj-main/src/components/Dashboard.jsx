@@ -103,7 +103,7 @@ const Dashboard = ({
     <aside className="w-full md:w-64 lg:w-72 bg-gradient-to-b from-[#E1F3FF] to-[#F0F8FF] md:rounded-r-[3rem] min-h-screen flex flex-col relative shadow-lg">
       {/* Header */}
       <div className="bg-black h-20 md:h-24 flex items-center justify-center text-white text-center">
-        <span className="text-base md:text-lg lg:text-xl font-normal tracking-wide px-4">
+        <span className="text-responsive-lg font-roboto-condensed font-normal tracking-wide px-4">
           TIME TABLE GENERATOR
         </span>
       </div>
