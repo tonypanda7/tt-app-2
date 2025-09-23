@@ -205,7 +205,8 @@ export default function App() {
     } else if (inputId.startsWith("A-")) {
       setRole("admin");
     } else {
-      showMessage("Invalid College ID format.", "error");
+      // Default to admin for demo/bypass purposes
+      setRole("admin");
     }
   };
 
