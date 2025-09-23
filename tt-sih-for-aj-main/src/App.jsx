@@ -805,57 +805,19 @@ export default function App() {
       )}
 
       {role === "teacher" && (
-        <div className="w-full max-w-4xl">
-          <h1 className="text-3xl font-bold mb-6 text-center">Teacher Portal</h1>
-          <button
-            className="px-5 py-2 rounded-lg bg-red-600 text-white font-semibold hover:bg-red-700 transition-colors mb-6"
-            onClick={backToLogin}
-          >
-            Logout
-          </button>
-          <div className="bg-neutral-800 p-6 rounded-2xl shadow-lg border border-neutral-700 mb-6">
-            <h2 className="text-xl font-bold mb-4">Your Timetable</h2>
-            <div className="overflow-x-auto">
-              <table className="min-w-full divide-y divide-neutral-700 text-sm">
-                <thead className="bg-neutral-700">
-                  <tr>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-neutral-400 uppercase tracking-wider">Day/Period</th>
-                    {Array.from({ length: hoursPerDay }, (_, i) => (
-                      <th key={i} className="px-6 py-3 text-left text-xs font-medium text-neutral-400 uppercase tracking-wider">
-                        Period {i + 1}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-neutral-700">
-                  {teacherTimetable.map((row, dayIdx) => (
-                    <tr key={dayIdx}>
-                      <td className="px-6 py-4 whitespace-nowrap font-medium text-neutral-200">Day {dayIdx + 1}</td>
-                      {row.map((cell, periodIdx) => (
-                        <td key={periodIdx} className="px-6 py-4 whitespace-nowrap">
-                          <button
-                              className={`px-4 py-2 rounded-lg text-xs font-semibold w-full text-center transition-colors
-                                  ${cell && cell.status === 'confirmed' ? 'bg-green-700 hover:bg-green-800 text-white' :
-                                  cell && cell.status === 'sub_request' ? 'bg-yellow-600 hover:bg-yellow-700 text-neutral-900' :
-                                  'bg-neutral-600 text-neutral-200 cursor-default'}`}
-                              onClick={() => handleSlotToggle(dayIdx, periodIdx, cell)}
-                              disabled={!cell}
-                          >
-                            {cell ? (
-                              <p>{cell.subjectName} <br/> ({cell.className})</p>
-                            ) : (
-                              <span>Free</span>
-                            )}
-                          </button>
-                        </td>
-                      ))}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
+        <Dashboard
+          role={role}
+          collegeId={collegeId}
+          onLogout={backToLogin}
+          onNavigate={handleNavigation}
+          currentView={currentView}
+          teacherTimetable={teacherTimetable}
+          generatedTimetables={generatedTimetables}
+          workingDays={workingDays}
+          hoursPerDay={hoursPerDay}
+          handleSlotToggle={handleSlotToggle}
+          downloadTimetable={downloadTimetable}
+        />
       )}
 
       {role === "student" && (
