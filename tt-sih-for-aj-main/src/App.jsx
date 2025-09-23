@@ -195,11 +195,11 @@ export default function App() {
 
   const handleLogin = (inputId, inputRole) => {
     setCollegeId(inputId);
-    if (collegeId.startsWith("S-")) {
+    if (inputId.startsWith("S-")) {
       setRole("student");
-    } else if (collegeId.startsWith("T-")) {
+    } else if (inputId.startsWith("T-")) {
       setRole("teacher");
-    } else if (collegeId.startsWith("A-")) {
+    } else if (inputId.startsWith("A-")) {
       setRole("admin");
     } else {
       showMessage("Invalid College ID format.", "error");
