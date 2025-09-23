@@ -6,6 +6,7 @@ import {
   getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken,
 } from "firebase/auth";
 import { initializeApp } from "firebase/app";
+import SignInPage from './components/SignInPage.jsx';
 
 // Define the types within the file for a single-file React app.
 /**
@@ -568,7 +569,7 @@ export default function App() {
     if (format === "xlsx") {
       const ws = XLSX.utils.aoa_to_sheet([headerRow, ...bodyRows]);
       const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, ws, clsName);
+��     XLSX.utils.book_append_sheet(wb, ws, clsName);
       XLSX.writeFile(wb, `${clsName}_timetable.xlsx`);
     } else if (format === "pdf") {
       // PDF FIX 3: Correctly instantiate jsPDF and use the autoTable plugin.
@@ -870,7 +871,7 @@ export default function App() {
                       ))}
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-neutral-700">
+        ��         <tbody className="divide-y divide-neutral-700">
                     {generatedTimetables[clsName].map((row, dayIdx) => (
                       <tr key={dayIdx}>
                         <td className="px-6 py-4 whitespace-nowrap font-medium text-neutral-200">Day {dayIdx + 1}</td>
