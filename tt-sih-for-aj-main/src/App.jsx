@@ -7,6 +7,7 @@ import {
 } from "firebase/auth";
 import { initializeApp } from "firebase/app";
 import SignInPage from './components/SignInPage.jsx';
+import Dashboard from './components/Dashboard.jsx';
 
 // Define the types within the file for a single-file React app.
 /**
@@ -97,6 +98,9 @@ export default function App() {
 
   // Modal state
   const [message, setMessage] = useState({ text: "", type: "info" });
+
+  // Navigation state for dashboard
+  const [currentView, setCurrentView] = useState('dashboard');
 
   // Load external library scripts and handle auth
   useEffect(() => {
@@ -223,11 +227,18 @@ export default function App() {
       // Default to admin for demo/bypass purposes
       setRole("admin");
     }
+    // Reset navigation view on login
+    setCurrentView('dashboard');
   };
 
   const backToLogin = () => {
     setRole(null);
     setCollegeId("");
+    setCurrentView('dashboard');
+  };
+
+  const handleNavigation = (view) => {
+    setCurrentView(view);
   };
 
   const showMessage = (text, type) => {
