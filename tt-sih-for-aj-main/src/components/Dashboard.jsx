@@ -504,7 +504,7 @@ const Dashboard = ({
       <main className="flex-1 p-4 md:p-6 lg:p-8 overflow-hidden">
         {/* Header */}
         <header className="flex flex-col md:flex-row justify-between items-center gap-4 mb-6 md:mb-8">
-          <h1 className="text-3xl md:text-4xl lg:text-5xl xl:text-6xl font-bold text-black uppercase tracking-wide">
+          <h1 className="text-responsive-5xl font-bebas-neue font-bold text-black uppercase tracking-wide">
             Hello {role === 'teacher' ? 'Teacher' : role === 'student' ? 'Student' : 'User'} !
           </h1>
           
