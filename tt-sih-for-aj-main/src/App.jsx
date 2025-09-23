@@ -194,6 +194,7 @@ export default function App() {
   }, [generatedTimetables, collegeId, role, workingDays, hoursPerDay]);
 
   const handleLogin = (inputId, inputRole) => {
+    setCollegeId(inputId);
     if (collegeId.startsWith("S-")) {
       setRole("student");
     } else if (collegeId.startsWith("T-")) {
