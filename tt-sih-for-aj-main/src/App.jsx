@@ -195,6 +195,9 @@ export default function App() {
 
   const handleLogin = (inputId, inputRole) => {
     setCollegeId(inputId);
+    if (inputRole) {
+      setRole(inputRole);
+    } else
     if (inputId.startsWith("S-")) {
       setRole("student");
     } else if (inputId.startsWith("T-")) {
