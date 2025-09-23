@@ -619,23 +619,7 @@ export default function App() {
         </div>
       )}
 
-      {!role && (
-        <div className="w-full max-w-sm bg-neutral-800 p-6 rounded-2xl shadow-lg border border-neutral-700">
-          <h1 className="text-2xl font-bold mb-4 text-center">College Login</h1>
-          <input
-            className="w-full p-3 mb-4 rounded-lg bg-neutral-700 text-white border border-neutral-600 placeholder:text-neutral-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
-            placeholder="Enter College ID (S-, T-, A-)"
-            value={collegeId}
-            onChange={(e) => setCollegeId(e.target.value)}
-          />
-          <button
-            className="w-full py-3 rounded-lg bg-blue-600 text-white font-semibold hover:bg-blue-700 transition-colors"
-            onClick={handleLogin}
-          >
-            Login
-          </button>
-        </div>
-      )}
+      {!role && <SignInPage onLogin={handleLogin} />}
 
       {role === "admin" && (
         <div className="w-full max-w-4xl">
