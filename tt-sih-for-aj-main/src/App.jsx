@@ -7,6 +7,7 @@ import {
 } from "firebase/auth";
 import { initializeApp } from "firebase/app";
 import SignInPage from './components/SignInPage.jsx';
+import Dashboard from './components/Dashboard.jsx';
 
 // Define the types within the file for a single-file React app.
 /**
@@ -47,6 +48,22 @@ const auth = app ? getAuth(app) : null;
 const db = app ? getFirestore(app) : null;
 const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
 
+// Helper to safely parse timetable data that may be stored as a JSON string or as an object/array already.
+function parseTimetableData(raw) {
+  if (!raw) return [];
+  if (typeof raw === 'string') {
+    try {
+      return JSON.parse(raw);
+    } catch (e) {
+      console.warn('Failed to parse timetable JSON, returning empty timetable instead.', e);
+      return [];
+    }
+  }
+  if (Array.isArray(raw)) return raw;
+  // If it's an object that resembles a timetable mapping, attempt to return as-is
+  return Array.isArray(raw) ? raw : [];
+}
+
 // Add the Tailwind CSS script for styling
 const tailwindScript = document.createElement('script');
 tailwindScript.src = "https://cdn.tailwindcss.com";
@@ -81,6 +98,9 @@ export default function App() {
 
   // Modal state
   const [message, setMessage] = useState({ text: "", type: "info" });
+
+  // Navigation state for dashboard
+  const [currentView, setCurrentView] = useState('dashboard');
 
   // Load external library scripts and handle auth
   useEffect(() => {
@@ -153,7 +173,7 @@ export default function App() {
         const timetableMap = {};
         snapshot.docs.forEach((doc) => {
           // Parse the JSON string back into a nested array
-          timetableMap[doc.id] = JSON.parse(doc.data().timetable);
+          timetableMap[doc.id] = parseTimetableData(doc.data().timetable);
         });
         setGeneratedTimetables(timetableMap);
       });
@@ -207,11 +227,18 @@ export default function App() {
       // Default to admin for demo/bypass purposes
       setRole("admin");
     }
+    // Reset navigation view on login
+    setCurrentView('dashboard');
   };
 
   const backToLogin = () => {
     setRole(null);
     setCollegeId("");
+    setCurrentView('dashboard');
+  };
+
+  const handleNavigation = (view) => {
+    setCurrentView(view);
   };
 
   const showMessage = (text, type) => {
@@ -513,7 +540,7 @@ export default function App() {
 
     const classTimetableDoc = await getDoc(timetableRef);
     if (!classTimetableDoc.exists()) return;
-    const classTimetable = JSON.parse(classTimetableDoc.data().timetable);
+    const classTimetable = parseTimetableData(classTimetableDoc.data().timetable);
     const updatedTimetable = classTimetable.map(day => [...day]);
     
     if (slot.status === "confirmed") {
@@ -531,7 +558,7 @@ export default function App() {
         for (const subId of potentialSubstitutes) {
             let isSubBusy = false;
             allTimetablesSnapshot.forEach(doc => {
-                const timetable = JSON.parse(doc.data().timetable);
+                const timetable = parseTimetableData(doc.data().timetable);
                 const slotToCheck = timetable[dayIndex][periodIndex];
                 if (slotToCheck && slotToCheck.teacherId === subId) {
                     isSubBusy = true;
@@ -778,123 +805,35 @@ export default function App() {
       )}
 
       {role === "teacher" && (
-        <div className="w-full max-w-4xl">
-          <h1 className="text-3xl font-bold mb-6 text-center">Teacher Portal</h1>
-          <button
-            className="px-5 py-2 rounded-lg bg-red-600 text-white font-semibold hover:bg-red-700 transition-colors mb-6"
-            onClick={backToLogin}
-          >
-            Logout
-          </button>
-          <div className="bg-neutral-800 p-6 rounded-2xl shadow-lg border border-neutral-700 mb-6">
-            <h2 className="text-xl font-bold mb-4">Your Timetable</h2>
-            <div className="overflow-x-auto">
-              <table className="min-w-full divide-y divide-neutral-700 text-sm">
-                <thead className="bg-neutral-700">
-                  <tr>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-neutral-400 uppercase tracking-wider">Day/Period</th>
-                    {Array.from({ length: hoursPerDay }, (_, i) => (
-                      <th key={i} className="px-6 py-3 text-left text-xs font-medium text-neutral-400 uppercase tracking-wider">
-                        Period {i + 1}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-neutral-700">
-                  {teacherTimetable.map((row, dayIdx) => (
-                    <tr key={dayIdx}>
-                      <td className="px-6 py-4 whitespace-nowrap font-medium text-neutral-200">Day {dayIdx + 1}</td>
-                      {row.map((cell, periodIdx) => (
-                        <td key={periodIdx} className="px-6 py-4 whitespace-nowrap">
-                          <button
-                              className={`px-4 py-2 rounded-lg text-xs font-semibold w-full text-center transition-colors
-                                  ${cell && cell.status === 'confirmed' ? 'bg-green-700 hover:bg-green-800 text-white' :
-                                  cell && cell.status === 'sub_request' ? 'bg-yellow-600 hover:bg-yellow-700 text-neutral-900' :
-                                  'bg-neutral-600 text-neutral-200 cursor-default'}`}
-                              onClick={() => handleSlotToggle(dayIdx, periodIdx, cell)}
-                              disabled={!cell}
-                          >
-                            {cell ? (
-                              <p>{cell.subjectName} <br/> ({cell.className})</p>
-                            ) : (
-                              <span>Free</span>
-                            )}
-                          </button>
-                        </td>
-                      ))}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
+        <Dashboard
+          role={role}
+          collegeId={collegeId}
+          onLogout={backToLogin}
+          onNavigate={handleNavigation}
+          currentView={currentView}
+          teacherTimetable={teacherTimetable}
+          generatedTimetables={generatedTimetables}
+          workingDays={workingDays}
+          hoursPerDay={hoursPerDay}
+          handleSlotToggle={handleSlotToggle}
+          downloadTimetable={downloadTimetable}
+        />
       )}
 
       {role === "student" && (
-        <div className="w-full max-w-4xl">
-          <h1 className="text-3xl font-bold mb-6 text-center">Student Portal</h1>
-          <button
-            className="px-5 py-2 rounded-lg bg-red-600 text-white font-semibold hover:bg-red-700 transition-colors mb-6"
-            onClick={backToLogin}
-          >
-            Logout
-          </button>
-          {Object.keys(generatedTimetables).map((clsName) => (
-            <div key={clsName} className="bg-neutral-800 p-6 rounded-2xl shadow-lg border border-neutral-700 mb-6">
-              <h2 className="text-xl font-bold mb-4">Timetable for {clsName}</h2>
-              <div className="overflow-x-auto">
-                <table className="min-w-full divide-y divide-neutral-700 text-sm">
-                  <thead className="bg-neutral-700">
-                    <tr>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-neutral-400 uppercase tracking-wider">Day/Period</th>
-                      {Array.from({ length: hoursPerDay }, (_, i) => (
-                        <th key={i} className="px-6 py-3 text-left text-xs font-medium text-neutral-400 uppercase tracking-wider">
-                          Period {i + 1}
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-neutral-700">
-                    {generatedTimetables[clsName].map((row, dayIdx) => (
-                      <tr key={dayIdx}>
-                        <td className="px-6 py-4 whitespace-nowrap font-medium text-neutral-200">Day {dayIdx + 1}</td>
-                        {row.map((cell, periodIdx) => (
-                          <td key={periodIdx} className="px-6 py-4 whitespace-nowrap">
-                            {/* LAYOUT FIX 5: Use a template literal with a space for conditional classes. */}
-                            <span className={`px-2 py-1 rounded-full text-xs font-semibold ${cell && cell.status === 'free' ? 'bg-red-700 text-white' : 'bg-neutral-600 text-neutral-200'}`}>
-                              {cell ? cell.subjectName : 'N/A'}
-                            </span>
-                          </td>
-                        ))}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              <div className="mt-4 flex flex-wrap gap-2">
-                <button
-                  onClick={() => downloadTimetable(clsName, "xlsx")}
-                  className="px-4 py-2 rounded-full text-xs font-semibold bg-blue-600 hover:bg-blue-700 text-white transition-colors"
-                >
-                  Download as XLSX
-                </button>
-                <button
-                  onClick={() => downloadTimetable(clsName, "pdf")}
-                  className="px-4 py-2 rounded-full text-xs font-semibold bg-blue-600 hover:bg-blue-700 text-white transition-colors"
-                >
-                  Download as PDF
-                </button>
-                <button
-                  onClick={() => downloadTimetable(clsName, "txt")}
-                  className="px-4 py-2 rounded-full text-xs font-semibold bg-blue-600 hover:bg-blue-700 text-white transition-colors"
-                >
-                  Download as TXT
-                </button>
-              </div>
-            </div>
-          ))}
-        </div>
+        <Dashboard
+          role={role}
+          collegeId={collegeId}
+          onLogout={backToLogin}
+          onNavigate={handleNavigation}
+          currentView={currentView}
+          teacherTimetable={teacherTimetable}
+          generatedTimetables={generatedTimetables}
+          workingDays={workingDays}
+          hoursPerDay={hoursPerDay}
+          handleSlotToggle={handleSlotToggle}
+          downloadTimetable={downloadTimetable}
+        />
       )}
     </div>
   );
