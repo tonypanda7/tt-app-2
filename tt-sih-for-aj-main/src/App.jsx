@@ -47,6 +47,22 @@ const auth = app ? getAuth(app) : null;
 const db = app ? getFirestore(app) : null;
 const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
 
+// Helper to safely parse timetable data that may be stored as a JSON string or as an object/array already.
+function parseTimetableData(raw) {
+  if (!raw) return [];
+  if (typeof raw === 'string') {
+    try {
+      return JSON.parse(raw);
+    } catch (e) {
+      console.warn('Failed to parse timetable JSON, returning empty timetable instead.', e);
+      return [];
+    }
+  }
+  if (Array.isArray(raw)) return raw;
+  // If it's an object that resembles a timetable mapping, attempt to return as-is
+  return Array.isArray(raw) ? raw : [];
+}
+
 // Add the Tailwind CSS script for styling
 const tailwindScript = document.createElement('script');
 tailwindScript.src = "https://cdn.tailwindcss.com";
@@ -153,7 +169,7 @@ export default function App() {
         const timetableMap = {};
         snapshot.docs.forEach((doc) => {
           // Parse the JSON string back into a nested array
-          timetableMap[doc.id] = JSON.parse(doc.data().timetable);
+          timetableMap[doc.id] = parseTimetableData(doc.data().timetable);
         });
         setGeneratedTimetables(timetableMap);
       });
@@ -513,7 +529,7 @@ export default function App() {
 
     const classTimetableDoc = await getDoc(timetableRef);
     if (!classTimetableDoc.exists()) return;
-    const classTimetable = JSON.parse(classTimetableDoc.data().timetable);
+    const classTimetable = parseTimetableData(classTimetableDoc.data().timetable);
     const updatedTimetable = classTimetable.map(day => [...day]);
     
     if (slot.status === "confirmed") {
@@ -531,7 +547,7 @@ export default function App() {
         for (const subId of potentialSubstitutes) {
             let isSubBusy = false;
             allTimetablesSnapshot.forEach(doc => {
-                const timetable = JSON.parse(doc.data().timetable);
+                const timetable = parseTimetableData(doc.data().timetable);
                 const slotToCheck = timetable[dayIndex][periodIndex];
                 if (slotToCheck && slotToCheck.teacherId === subId) {
                     isSubBusy = true;
