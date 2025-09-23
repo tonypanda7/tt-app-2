@@ -123,9 +123,9 @@ const Dashboard = ({
 
       {/* Navigation items */}
       <nav className="mt-44 md:mt-52 space-y-6 md:space-y-8 px-6 md:px-8">
-        <button 
+        <button
           onClick={() => onNavigate('dashboard')}
-          className={`flex items-center gap-3 md:gap-4 text-black text-lg md:text-xl font-light transition-all duration-200 hover:translate-x-1 ${
+          className={`flex items-center gap-3 md:gap-4 text-black text-responsive-xl font-poppins font-light transition-all duration-200 hover:translate-x-1 ${
             currentView === 'dashboard' ? 'font-medium text-gray-800' : 'hover:font-medium'
           }`}
         >
