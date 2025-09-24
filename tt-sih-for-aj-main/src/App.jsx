@@ -847,6 +847,7 @@ export default function App() {
           hoursPerDay={hoursPerDay}
           handleSlotToggle={handleSlotToggle}
           downloadTimetable={downloadTimetable}
+          studentClass={studentClass}
         />
       )}
     </div>
