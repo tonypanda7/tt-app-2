@@ -417,7 +417,8 @@ const Dashboard = ({
         </div>
       );
     } else {
-      // Student view
+      // Student view - show only their assigned class timetable
+      const visibleClasses = studentClass ? [studentClass] : [];
       return (
         <div className="min-h-screen bg-neutral-900 text-white p-4 md:p-5">
           <div className="w-full max-w-7xl mx-auto">
@@ -436,58 +437,65 @@ const Dashboard = ({
                 Logout
               </button>
             </div>
-            {Object.keys(generatedTimetables).map((clsName) => (
-              <div key={clsName} className="bg-neutral-800 p-4 md:p-6 rounded-2xl shadow-lg border border-neutral-700 mb-6">
-                <h2 className="text-xl font-bold mb-4">Timetable for {clsName}</h2>
-                <div className="overflow-x-auto">
-                  <table className="min-w-full divide-y divide-neutral-700 text-sm">
-                    <thead className="bg-neutral-700">
-                      <tr>
-                        <th className="px-4 md:px-6 py-3 text-left text-xs font-medium text-neutral-400 uppercase tracking-wider">Day/Period</th>
-                        {Array.from({ length: hoursPerDay }, (_, i) => (
-                          <th key={i} className="px-4 md:px-6 py-3 text-left text-xs font-medium text-neutral-400 uppercase tracking-wider">
-                            Period {i + 1}
-                          </th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-neutral-700">
-                      {generatedTimetables[clsName].map((row, dayIdx) => (
-                        <tr key={dayIdx}>
-                          <td className="px-4 md:px-6 py-4 whitespace-nowrap font-medium text-neutral-200">Day {dayIdx + 1}</td>
-                          {row.map((cell, periodIdx) => (
-                            <td key={periodIdx} className="px-4 md:px-6 py-4 whitespace-nowrap">
-                              <span className={`px-2 py-1 rounded-full text-xs font-semibold ${cell && cell.status === 'free' ? 'bg-red-700 text-white' : 'bg-neutral-600 text-neutral-200'}`}>
-                                {cell ? cell.subjectName : 'N/A'}
-                              </span>
-                            </td>
+            {visibleClasses.length === 0 && (
+              <div className="bg-neutral-800 p-4 md:p-6 rounded-2xl shadow-lg border border-neutral-700 mb-6 text-center text-neutral-300">
+                No class assigned. Please contact admin.
+              </div>
+            )}
+            {visibleClasses.map((clsName) => (
+              generatedTimetables[clsName] && (
+                <div key={clsName} className="bg-neutral-800 p-4 md:p-6 rounded-2xl shadow-lg border border-neutral-700 mb-6">
+                  <h2 className="text-xl font-bold mb-4">Timetable for {clsName}</h2>
+                  <div className="overflow-x-auto">
+                    <table className="min-w-full divide-y divide-neutral-700 text-sm">
+                      <thead className="bg-neutral-700">
+                        <tr>
+                          <th className="px-4 md:px-6 py-3 text-left text-xs font-medium text-neutral-400 uppercase tracking-wider">Day/Period</th>
+                          {Array.from({ length: hoursPerDay }, (_, i) => (
+                            <th key={i} className="px-4 md:px-6 py-3 text-left text-xs font-medium text-neutral-400 uppercase tracking-wider">
+                              Period {i + 1}
+                            </th>
                           ))}
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                      </thead>
+                      <tbody className="divide-y divide-neutral-700">
+                        {generatedTimetables[clsName].map((row, dayIdx) => (
+                          <tr key={dayIdx}>
+                            <td className="px-4 md:px-6 py-4 whitespace-nowrap font-medium text-neutral-200">Day {dayIdx + 1}</td>
+                            {row.map((cell, periodIdx) => (
+                              <td key={periodIdx} className="px-4 md:px-6 py-4 whitespace-nowrap">
+                                <span className={`px-2 py-1 rounded-full text-xs font-semibold ${cell && cell.status === 'free' ? 'bg-red-700 text-white' : 'bg-neutral-600 text-neutral-200'}`}>
+                                  {cell ? cell.subjectName : 'N/A'}
+                                </span>
+                              </td>
+                            ))}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    <button
+                      onClick={() => downloadTimetable && downloadTimetable(clsName, "xlsx")}
+                      className="px-4 py-2 rounded-full text-xs font-semibold bg-blue-600 hover:bg-blue-700 text-white transition-colors"
+                    >
+                      Download as XLSX
+                    </button>
+                    <button
+                      onClick={() => downloadTimetable && downloadTimetable(clsName, "pdf")}
+                      className="px-4 py-2 rounded-full text-xs font-semibold bg-blue-600 hover:bg-blue-700 text-white transition-colors"
+                    >
+                      Download as PDF
+                    </button>
+                    <button
+                      onClick={() => downloadTimetable && downloadTimetable(clsName, "txt")}
+                      className="px-4 py-2 rounded-full text-xs font-semibold bg-blue-600 hover:bg-blue-700 text-white transition-colors"
+                    >
+                      Download as TXT
+                    </button>
+                  </div>
                 </div>
-                <div className="mt-4 flex flex-wrap gap-2">
-                  <button
-                    onClick={() => downloadTimetable && downloadTimetable(clsName, "xlsx")}
-                    className="px-4 py-2 rounded-full text-xs font-semibold bg-blue-600 hover:bg-blue-700 text-white transition-colors"
-                  >
-                    Download as XLSX
-                  </button>
-                  <button
-                    onClick={() => downloadTimetable && downloadTimetable(clsName, "pdf")}
-                    className="px-4 py-2 rounded-full text-xs font-semibold bg-blue-600 hover:bg-blue-700 text-white transition-colors"
-                  >
-                    Download as PDF
-                  </button>
-                  <button
-                    onClick={() => downloadTimetable && downloadTimetable(clsName, "txt")}
-                    className="px-4 py-2 rounded-full text-xs font-semibold bg-blue-600 hover:bg-blue-700 text-white transition-colors"
-                  >
-                    Download as TXT
-                  </button>
-                </div>
-              </div>
+              )
             ))}
           </div>
         </div>
