@@ -1,17 +1,18 @@
 import { useState } from 'react';
 
-const Dashboard = ({ 
-  role, 
-  collegeId, 
-  onLogout, 
-  onNavigate, 
+const Dashboard = ({
+  role,
+  collegeId,
+  onLogout,
+  onNavigate,
   currentView = 'dashboard',
   teacherTimetable = [],
   generatedTimetables = {},
   workingDays = 5,
   hoursPerDay = 5,
   handleSlotToggle,
-  downloadTimetable 
+  downloadTimetable,
+  studentClass
 }) => {
   const [selectedWeekDay, setSelectedWeekDay] = useState(0);
 
