@@ -1,6 +1,6 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
-  getFirestore, collection, doc, setDoc, onSnapshot, getDoc, getDocs
+  getFirestore, collection, doc, setDoc, onSnapshot, getDoc
 } from "firebase/firestore";
 import {
   getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken,
@@ -74,9 +74,16 @@ export default function App() {
   const [role, setRole] = useState(null);
   const [classes, setClasses] = useState([]);
   const [teachers, setTeachers] = useState([]);
+
+  // Admin timetable settings (UI controls) and persisted settings
   const [workingDays, setWorkingDays] = useState(5);
   const [hoursPerDay, setHoursPerDay] = useState(5);
-  const [breakSlots, setBreakSlots] = useState([]);
+  const [breakSlots, setBreakSlots] = useState([]); // zero-based indices preferred
+  const [classStartTime, setClassStartTime] = useState("09:00");
+  const [classDuration, setClassDuration] = useState(60);
+  const [freePeriodPercentage, setFreePeriodPercentage] = useState(20);
+  const [timetableSettings, setTimetableSettings] = useState(null);
+
   const [generatedTimetables, setGeneratedTimetables] = useState({});
 
   // Subject management state
@@ -89,18 +96,20 @@ export default function App() {
   const [userId, setUserId] = useState(null);
   const [isAuthReady, setIsAuthReady] = useState(false);
 
-  // New state for tracking library loading and uploads
+  // Libraries and uploads
   const [isLibrariesLoaded, setIsLibrariesLoaded] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
 
-  // Teacher-specific state
+  // Teacher and student state
   const [teacherTimetable, setTeacherTimetable] = useState([]);
+  const [studentClass, setStudentClass] = useState(null);
 
-  // Modal state
+  // UI state
   const [message, setMessage] = useState({ text: "", type: "info" });
-
-  // Navigation state for dashboard
   const [currentView, setCurrentView] = useState('dashboard');
+
+  // Guards
+  const isGeneratingRef = useRef(false);
 
   // Load external library scripts and handle auth
   useEffect(() => {
@@ -114,11 +123,9 @@ export default function App() {
       });
     };
 
-    // PDF FIX 1: Add the jspdf-autotable library to be loaded.
     Promise.all([
       loadScript("https://unpkg.com/xlsx/dist/xlsx.full.min.js"),
       loadScript("https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"),
-      loadScript("https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"),
       loadScript("https://cdn.jsdelivr.net/npm/file-saver@2.0.5/dist/FileSaver.min.js")
     ])
     .then(() => setIsLibrariesLoaded(true))
@@ -129,7 +136,6 @@ export default function App() {
 
     if (!auth) return;
 
-    // Auth logic to correctly use the custom token
     const authenticate = async () => {
       try {
         if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
@@ -145,36 +151,48 @@ export default function App() {
     authenticate();
 
     const unsubscribe = onAuthStateChanged(auth, (user) => {
-      if (user) {
-        setUserId(user.uid);
-      }
+      if (user) setUserId(user.uid);
       setIsAuthReady(true);
     });
     return () => unsubscribe();
   }, [auth]);
 
-  // All listeners now point to the public collection.
+  // Listeners for classes, teachers, timetables + settings
   useEffect(() => {
     if (isAuthReady && userId && db) {
       const classesCol = collection(db, "artifacts", appId, "public", "data", "classes");
       const unsubscribeClasses = onSnapshot(classesCol, (snapshot) => {
-        const classList = snapshot.docs.map((doc) => doc.data());
+        const classList = snapshot.docs.map((d) => d.data());
         setClasses(classList);
       });
 
       const teachersCol = collection(db, "artifacts", appId, "public", "data", "teachers");
       const unsubscribeTeachers = onSnapshot(teachersCol, (snapshot) => {
-        const teacherList = snapshot.docs.map((doc) => doc.data());
+        const teacherList = snapshot.docs.map((d) => d.data());
         setTeachers(teacherList);
       });
 
       const timetablesCol = collection(db, "artifacts", appId, "public", "data", "timetables");
       const unsubscribeTimetables = onSnapshot(timetablesCol, (snapshot) => {
         const timetableMap = {};
-        snapshot.docs.forEach((doc) => {
-          // Parse the JSON string back into a nested array
-          timetableMap[doc.id] = parseTimetableData(doc.data().timetable);
+        let settings = null;
+        snapshot.docs.forEach((d) => {
+          if (d.id === 'settings') {
+            settings = d.data();
+          } else {
+            timetableMap[d.id] = parseTimetableData(d.data().timetable);
+          }
         });
+
+        if (settings) {
+          setTimetableSettings(settings);
+          setWorkingDays(settings.workingDays ?? 5);
+          setHoursPerDay(settings.hoursPerDay ?? 5);
+          setBreakSlots(Array.isArray(settings.breakSlots) ? settings.breakSlots : []);
+          setClassStartTime(settings.classStartTime ?? "09:00");
+          setClassDuration(settings.classDuration ?? 60);
+          setFreePeriodPercentage(settings.freePeriodPercentage ?? 20);
+        }
         setGeneratedTimetables(timetableMap);
       });
 
@@ -186,60 +204,83 @@ export default function App() {
     }
   }, [isAuthReady, userId, db]);
 
-  // Consolidate the teacher's timetable when generatedTimetables or collegeId changes
+  // Build teacher timetable using current settings
   useEffect(() => {
-      if (role === "teacher" && collegeId) {
-          const teacherId = collegeId;
-          const teacherTimetable = Array.from({ length: workingDays }, () =>
-              Array.from({ length: hoursPerDay }, () => null)
-          );
+    if (role === 'teacher' && collegeId && (timetableSettings || (workingDays && hoursPerDay))) {
+      const teacherId = collegeId;
+      const days = workingDays;
+      const hours = hoursPerDay;
+      const breaks = breakSlots || [];
 
-          Object.keys(generatedTimetables).forEach(className => {
-              const classTimetable = generatedTimetables[className];
-              classTimetable.forEach((daySlots, dayIndex) => {
-                  daySlots.forEach((slot, periodIndex) => {
-                      if (slot && slot.teacherId === teacherId) {
-                          teacherTimetable[dayIndex][periodIndex] = {
-                              subjectName: slot.subjectName,
-                              className: className,
-                              status: slot.status,
-                              teacherId: slot.teacherId,
-                          };
-                      }
-                  });
-              });
-          });
-          setTeacherTimetable(teacherTimetable);
+      const base = Array.from({ length: days }, () => Array.from({ length: hours }, () => null));
+
+      // Mark breaks
+      for (let d = 0; d < days; d++) {
+        breaks.forEach((p) => {
+          if (p >= 0 && p < hours) {
+            base[d][p] = { subjectName: 'Break', className: '', status: 'break', teacherId: '' };
+          }
+        });
       }
-  }, [generatedTimetables, collegeId, role, workingDays, hoursPerDay]);
+
+      // Fill assigned slots
+      Object.keys(generatedTimetables).forEach((className) => {
+        const table = generatedTimetables[className];
+        if (!Array.isArray(table)) return;
+        table.forEach((daySlots, dayIdx) => {
+          daySlots.forEach((slot, periodIdx) => {
+            if (slot && slot.teacherId === teacherId) {
+              base[dayIdx][periodIdx] = {
+                subjectName: slot.subjectName,
+                className,
+                status: slot.status,
+                teacherId: slot.teacherId,
+              };
+            }
+          });
+        });
+      });
+
+      // Fill remaining as Free
+      for (let d = 0; d < days; d++) {
+        for (let p = 0; p < hours; p++) {
+          if (!base[d][p]) base[d][p] = { subjectName: 'Free', className: '', status: 'free', teacherId: '' };
+        }
+      }
+      setTeacherTimetable(base);
+    }
+  }, [generatedTimetables, collegeId, role, timetableSettings, workingDays, hoursPerDay, breakSlots]);
 
   const handleLogin = (inputId, inputRole) => {
-    setCollegeId(inputId);
-    if (inputRole) {
-      setRole(inputRole);
-    } else if (inputId.startsWith("S-")) {
-      setRole("student");
-    } else if (inputId.startsWith("T-")) {
-      setRole("teacher");
-    } else if (inputId.startsWith("A-")) {
-      setRole("admin");
-    } else {
-      // Default to admin for demo/bypass purposes
-      setRole("admin");
+    const id = inputId || collegeId;
+    if (!id) return;
+    setCollegeId(id);
+
+    let r = inputRole;
+    if (!r) {
+      if (id.startsWith('S-')) r = 'student';
+      else if (id.startsWith('T-')) r = 'teacher';
+      else if (id.startsWith('A-')) r = 'admin';
+      else r = 'admin';
     }
-    // Reset navigation view on login
+    setRole(r);
+
+    if (r === 'student') {
+      const cls = classes.find(c => Array.isArray(c.students) && c.students.includes(id));
+      if (cls) setStudentClass(cls.name);
+    }
+
     setCurrentView('dashboard');
   };
 
   const backToLogin = () => {
     setRole(null);
     setCollegeId("");
+    setStudentClass(null);
     setCurrentView('dashboard');
   };
 
-  const handleNavigation = (view) => {
-    setCurrentView(view);
-  };
+  const handleNavigation = (view) => setCurrentView(view);
 
   const showMessage = (text, type) => {
     setMessage({ text, type });
@@ -248,14 +289,8 @@ export default function App() {
 
   const handleTeacherCSV = async (e) => {
     const file = e.target.files?.[0];
-    if (!file) {
-      showMessage("No file selected.", "error");
-      return;
-    }
-    if (!db) {
-      showMessage("Database not ready. Please try again.", "error");
-      return;
-    }
+    if (!file) { showMessage("No file selected.", "error"); return; }
+    if (!db) { showMessage("Database not ready. Please try again.", "error"); return; }
 
     setIsUploading(true);
     const reader = new FileReader();
@@ -282,7 +317,6 @@ export default function App() {
           };
         });
 
-        // Use a more explicit path for clarity and robustness
         const teachersPublicRef = collection(db, "artifacts", appId, "public", "data", "teachers");
         const uploadPromises = newTeachers.map((teacher) => {
           const teacherDocRef = doc(teachersPublicRef, teacher.id);
@@ -291,7 +325,6 @@ export default function App() {
         await Promise.all(uploadPromises);
 
         setTeachers(newTeachers);
-
         showMessage("Teachers uploaded successfully!", "success");
       } catch (error) {
         console.error("Error uploading teachers:", error);
@@ -306,10 +339,7 @@ export default function App() {
   const handleStudentCSV = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (!db) {
-      showMessage("Database not ready. Please try again.", "error");
-      return;
-    }
+    if (!db) { showMessage("Database not ready. Please try again.", "error"); return; }
 
     setIsUploading(true);
     const reader = new FileReader();
@@ -332,9 +362,8 @@ export default function App() {
 
         const classesPublicRef = collection(db, "artifacts", appId, "public", "data", "classes");
         const uploadPromises = Object.keys(classesMap).map(clsName => {
-            const classDocRef = doc(classesPublicRef, clsName);
-            // Use { merge: true } to avoid overwriting existing subjects
-            return setDoc(classDocRef, classesMap[clsName], { merge: true });
+          const classDocRef = doc(classesPublicRef, clsName);
+          return setDoc(classDocRef, classesMap[clsName], { merge: true });
         });
         await Promise.all(uploadPromises);
         showMessage("Students uploaded successfully!", "success");
@@ -353,16 +382,12 @@ export default function App() {
       showMessage("Please fill all subject fields correctly.", "error");
       return;
     }
-    if (!db) {
-      showMessage("Database not ready. Please try again.", "error");
-      return;
-    }
+    if (!db) { showMessage("Database not ready. Please try again.", "error"); return; }
+
     const classToUpdate = classes.find(cls => cls.name === selectedClass);
-    if (!classToUpdate) {
-      showMessage("Selected class not found.", "error");
-      return;
-    }
-    const updatedSubjects = [...classToUpdate.subjects, {
+    if (!classToUpdate) { showMessage("Selected class not found.", "error"); return; }
+
+    const updatedSubjects = [...(classToUpdate.subjects || []), {
       name: newSubjectName,
       credits: Number(newSubjectCredits),
       teachers: newSubjectTeachers
@@ -377,248 +402,244 @@ export default function App() {
   };
 
   const generateTimetable = async () => {
+    if (isGeneratingRef.current) return;
+    isGeneratingRef.current = true;
+
     if (classes.length === 0 || teachers.length === 0) {
       showMessage("Please upload teacher and student data first.", "error");
+      isGeneratingRef.current = false;
       return;
     }
-    if (!db) {
-      showMessage("Database not ready. Please try again.", "error");
-      return;
-    }
+    if (!db) { showMessage("Database not ready. Please try again.", "error"); isGeneratingRef.current = false; return; }
 
     const classesWithoutSubjects = classes.filter(cls => !cls.subjects || cls.subjects.length === 0);
     if (classesWithoutSubjects.length > 0) {
       const classNames = classesWithoutSubjects.map(c => c.name).join(", ");
       showMessage(`Classes ${classNames} have no subjects assigned. Please assign subjects before generating the timetable.`, "error");
+      isGeneratingRef.current = false;
       return;
     }
 
-    const teachersData = [...teachers];
-    const classesData = [...classes];
-    const timetablesToSave = {};
-    const totalSlots = workingDays * hoursPerDay;
+    const currentWorkingDays = workingDays;
+    const currentHoursPerDay = hoursPerDay;
+    const currentBreakSlots = breakSlots || [];
+    const currentFreePercent = freePeriodPercentage;
+    const totalSlotsPerWeek = currentWorkingDays * currentHoursPerDay;
 
-    const teacherSlots = {};
     const teacherHoursLeft = {};
-    teachersData.forEach((t) => {
-      teacherSlots[t.id] = Array(workingDays).fill(0).map(() => Array(hoursPerDay).fill(false));
-      teacherHoursLeft[t.id] = t.weeklyRequiredHours;
-    });
+    teachers.forEach(t => { teacherHoursLeft[t.id] = t.weeklyRequiredHours; });
 
-    for (const cls of classesData) {
-      const classSubjects = [...cls.subjects];
-      const totalSubjectCredits = classSubjects.reduce((sum, sub) => sum + sub.credits, 0);
-      const subjectSlots = totalSlots - Math.round(totalSlots * 0.20) - breakSlots.length; // 20% free + breaks
+    const newTimetables = {};
 
-      // Create a pool of all required periods based on credits
-      let periodPool = [];
-      classSubjects.forEach(sub => {
-        const numPeriods = totalSubjectCredits > 0 ? Math.round((sub.credits / totalSubjectCredits) * subjectSlots) : 0;
-        for (let i = 0; i < numPeriods; i++) {
-          periodPool.push({
-            subjectName: sub.name,
-            teachers: sub.teachers,
-            isHigherCredit: sub.credits > 2 // Heuristic for 'higher credit'
-          });
-        }
-      });
-      // Add free periods and break periods to fill the remaining slots
-      const freePeriodsNeeded = totalSlots - periodPool.length - breakSlots.length;
-      for (let i = 0; i < freePeriodsNeeded; i++) {
-        periodPool.push({
-          subjectName: "Free",
-          teachers: [],
-          isHigherCredit: false
+    for (const cls of classes) {
+      const table = Array.from({ length: currentWorkingDays }, () => Array.from({ length: currentHoursPerDay }, () => null));
+
+      // Pre-fill break slots
+      for (let day = 0; day < currentWorkingDays; day++) {
+        currentBreakSlots.forEach((period) => {
+          if (period >= 0 && period < currentHoursPerDay) {
+            table[day][period] = { subjectName: 'Break', className: '', status: 'break', teacherId: '' };
+          }
         });
       }
 
-      // Shuffle the period pool for randomness
-      periodPool.sort(() => Math.random() - 0.5);
+      // Create subject period pool based on credits
+      const totalCredits = cls.subjects.reduce((sum, s) => sum + Number(s.credits || 0), 0);
+      const subjectSlotsTarget = Math.round(totalSlotsPerWeek * (1 - currentBreakSlots.length / currentHoursPerDay / currentWorkingDays) * (1 - currentFreePercent / 100));
+      const pool = [];
+      cls.subjects.forEach((s) => {
+        const count = totalCredits > 0 ? Math.round((Number(s.credits || 0) / totalCredits) * subjectSlotsTarget) : 0;
+        for (let i = 0; i < count; i++) pool.push({ subjectName: s.name, teachers: s.teachers });
+      });
 
-      const table = Array(workingDays).fill(0).map(() => Array(hoursPerDay).fill(null));
+      // Fill remaining with Free
+      while (pool.length < (currentWorkingDays * currentHoursPerDay - currentBreakSlots.length)) {
+        pool.push({ subjectName: 'Free', teachers: [] });
+      }
 
-      for (let day = 0; day < workingDays; day++) {
-        const dailySubjectCount = {};
-        for (let period = 0; period < hoursPerDay; period++) {
-          // Check for and handle break slots
-          if (breakSlots.includes(period + 1)) { // Match 1-based period numbers
-            table[day][period] = { subjectName: "Break", className: "", status: "break", teacherId: "" };
-            continue;
-          }
+      // Shuffle
+      pool.sort(() => Math.random() - 0.5);
 
-          let assigned = false;
-          let tempPeriodPool = [...periodPool];
+      for (let day = 0; day < currentWorkingDays; day++) {
+        for (let period = 0; period < currentHoursPerDay; period++) {
+          if (table[day][period]) continue; // break already set
 
-          // Sort pool to prioritize a lower-credit subject after a high-credit one
-          const lastPeriod = period > 0 ? table[day][period - 1] : null;
-          if (lastPeriod && lastPeriod.isHigherCredit) {
-            tempPeriodPool.sort((a, b) => (a.isHigherCredit === b.isHigherCredit) ? 0 : a.isHigherCredit ? 1 : -1);
-          } else {
-            // Otherwise, shuffle
-            tempPeriodPool.sort(() => Math.random() - 0.5);
-          }
+          let placed = false;
+          for (let i = 0; i < pool.length; i++) {
+            const cand = pool[i];
 
-          for (let i = 0; i < tempPeriodPool.length; i++) {
-            const slotToAssign = tempPeriodPool[i];
-
-            if (slotToAssign.subjectName !== "Free" && dailySubjectCount[slotToAssign.subjectName] >= 2) {
-              continue;
+            // Limit same subject to at most 2 per day
+            if (cand.subjectName !== 'Free') {
+              const countToday = table[day].filter(s => s && s.subjectName === cand.subjectName).length;
+              if (countToday >= 2) continue;
             }
 
-            const prevSlot = period > 0 ? table[day][period - 1] : null;
-            const prevPrevSlot = period > 1 ? table[day][period - 2] : null;
-            if (prevSlot && prevPrevSlot && prevSlot.subjectName === slotToAssign.subjectName && prevPrevSlot.subjectName === slotToAssign.subjectName) {
-              continue;
-            }
-
-            let teacherId = null;
-            if (slotToAssign.subjectName !== "Free") {
-              const availableTeacher = slotToAssign.teachers.find((tid) => teacherSlots[tid] && !teacherSlots[tid][day][period] && teacherHoursLeft[tid] > 0);
-              if (availableTeacher) {
-                teacherId = availableTeacher;
-              } else {
-                continue;
-              }
+            let teacherId = '';
+            if (cand.subjectName !== 'Free') {
+              const avail = cand.teachers.find(tid => (teacherHoursLeft[tid] || 0) > 0 &&
+                !Object.values(newTimetables).some(tt => tt?.[day]?.[period]?.teacherId === tid));
+              if (!avail) continue;
+              teacherId = avail;
             }
 
             table[day][period] = {
-              subjectName: slotToAssign.subjectName,
+              subjectName: cand.subjectName,
               className: cls.name,
-              status: slotToAssign.subjectName === "Free" ? "free" : "confirmed",
-              teacherId: teacherId,
-              isHigherCredit: slotToAssign.isHigherCredit
+              status: cand.subjectName === 'Free' ? 'free' : 'confirmed',
+              teacherId
             };
-            
-            dailySubjectCount[slotToAssign.subjectName] = (dailySubjectCount[slotToAssign.subjectName] || 0) + 1;
 
-            if (teacherId) {
-              teacherSlots[teacherId][day][period] = true;
-              teacherHoursLeft[teacherId]--;
-            }
-
-            const assignedIndex = periodPool.findIndex(p => p.subjectName === slotToAssign.subjectName && p.teachers.join(',') === slotToAssign.teachers.join(','));
-            if (assignedIndex > -1) {
-              periodPool.splice(assignedIndex, 1);
-            }
-            assigned = true;
+            if (teacherId) teacherHoursLeft[teacherId] = (teacherHoursLeft[teacherId] || 0) - 1;
+            pool.splice(i, 1);
+            placed = true;
             break;
           }
 
-          if (!assigned) {
-            table[day][period] = { subjectName: "Free", className: cls.name, status: "free", teacherId: "" };
+          if (!placed) {
+            table[day][period] = { subjectName: 'Free', className: '', status: 'free', teacherId: '' };
           }
         }
       }
-      timetablesToSave[cls.name] = table;
+
+      newTimetables[cls.name] = table;
     }
 
     try {
-      const writePromises = [];
-      for (const clsName in timetablesToSave) {
+      const settingsRef = doc(db, "artifacts", appId, "public", "data", "timetables", "settings");
+      await setDoc(settingsRef, {
+        workingDays, hoursPerDay, breakSlots, classStartTime, classDuration, freePeriodPercentage
+      }, { merge: true });
+
+      for (const clsName in newTimetables) {
         const timetableRef = doc(db, "artifacts", appId, "public", "data", "timetables", clsName);
-        writePromises.push(setDoc(timetableRef, { timetable: JSON.stringify(timetablesToSave[clsName]) }));
+        await setDoc(timetableRef, { timetable: JSON.stringify(newTimetables[clsName]) });
       }
 
-      for (const t of teachersData) {
+      for (const t of teachers) {
         const teacherRef = doc(db, "artifacts", appId, "public", "data", "teachers", t.id);
-        writePromises.push(setDoc(teacherRef, { hoursLeft: teacherHoursLeft[t.id] }, { merge: true }));
+        await setDoc(teacherRef, { hoursLeft: teacherHoursLeft[t.id] }, { merge: true });
       }
-      await Promise.all(writePromises);
+
       showMessage("Timetable generated and saved successfully!", "success");
     } catch (error) {
       console.error("Error generating/saving timetable:", error);
       showMessage("Failed to generate and save timetable. Check console for details.", "error");
+    } finally {
+      isGeneratingRef.current = false;
     }
   };
 
   const handleSlotToggle = async (dayIndex, periodIndex, slot) => {
-    // Simplified and corrected logic for substitution
-    if (!db) return;
+    if (!db) { showMessage("Database not ready. Please try again.", "error"); return; }
     const className = slot.className;
     const subjectName = slot.subjectName;
-    const timetableRef = doc(db, "artifacts", appId, "public", "data", "timetables", className);
+    const currentTeacherId = collegeId;
 
-    const classTimetableDoc = await getDoc(timetableRef);
-    if (!classTimetableDoc.exists()) return;
-    const classTimetable = parseTimetableData(classTimetableDoc.data().timetable);
-    const updatedTimetable = classTimetable.map(day => [...day]);
-    
-    if (slot.status === "confirmed") {
-      const currentTeacherId = collegeId;
-      const classDoc = await getDoc(doc(db, "artifacts", appId, "public", "data", "classes", className));
+    if (slot.status === 'confirmed') {
+      const classDocRef = doc(db, "artifacts", appId, "public", "data", "classes", className);
+      const classDoc = await getDoc(classDocRef);
       if (!classDoc.exists()) return;
+      const subjectData = (classDoc.data().subjects || []).find(s => s.name === subjectName);
+      if (!subjectData) return;
 
-      const subjectData = classDoc.data().subjects.find(s => s.name === subjectName);
-      const potentialSubstitutes = subjectData.teachers.filter(tid => tid !== currentTeacherId);
+      const otherTeachers = (subjectData.teachers || []).filter(tid => tid !== currentTeacherId);
       let replacementFound = false;
-
-      if (potentialSubstitutes.length > 0) {
-        const allTimetablesSnapshot = await getDocs(collection(db, "artifacts", appId, "public", "data", "timetables"));
-        
-        for (const subId of potentialSubstitutes) {
-            let isSubBusy = false;
-            allTimetablesSnapshot.forEach(doc => {
-                const timetable = parseTimetableData(doc.data().timetable);
-                const slotToCheck = timetable[dayIndex][periodIndex];
-                if (slotToCheck && slotToCheck.teacherId === subId) {
-                    isSubBusy = true;
-                }
-            });
-
-            if (!isSubBusy) {
-                updatedTimetable[dayIndex][periodIndex] = { ...slot, status: "sub_request", teacherId: subId };
-                await setDoc(timetableRef, { timetable: JSON.stringify(updatedTimetable) });
-                showMessage(`Substitution request sent to Teacher ${subId}!`, "info");
-                replacementFound = true;
-                break; // Exit loop once a sub is found
-            }
+      for (const otherTeacherId of otherTeachers) {
+        const timetableRef = doc(db, "artifacts", appId, "public", "data", "timetables", className);
+        const timetableDoc = await getDoc(timetableRef);
+        if (timetableDoc.exists()) {
+          const classTimetable = parseTimetableData(timetableDoc.data().timetable);
+          const isFree = classTimetable?.[dayIndex]?.[periodIndex]?.subjectName === 'Free';
+          if (isFree) {
+            const updatedTimetable = classTimetable.map(day => [...day]);
+            updatedTimetable[dayIndex][periodIndex] = {
+              subjectName,
+              className,
+              status: 'sub_request',
+              teacherId: otherTeacherId,
+            };
+            await setDoc(timetableRef, { timetable: JSON.stringify(updatedTimetable) });
+            showMessage(`Substitution request sent to Teacher ${otherTeacherId}!`, "info");
+            replacementFound = true;
+            break;
+          }
         }
       }
 
       if (!replacementFound) {
-        updatedTimetable[dayIndex][periodIndex] = { subjectName: "Free", className: "", status: "free", teacherId: "" };
+        const timetableRef = doc(db, "artifacts", appId, "public", "data", "timetables", className);
+        const classTimetableDoc = await getDoc(timetableRef);
+        const classTimetable = parseTimetableData(classTimetableDoc.data().timetable);
+        const updatedTimetable = classTimetable.map(day => [...day]);
+        updatedTimetable[dayIndex][periodIndex] = { subjectName: 'Free', className: '', status: 'free', teacherId: '' };
         await setDoc(timetableRef, { timetable: JSON.stringify(updatedTimetable) });
         showMessage("No substitute available. Slot converted to a Free Period.", "info");
       }
-    } else if (slot.status === "sub_request") {
-        updatedTimetable[dayIndex][periodIndex] = { ...slot, status: "confirmed" };
-        await setDoc(timetableRef, { timetable: JSON.stringify(updatedTimetable) });
-        showMessage("Class accepted! Your timetable has been updated.", "success");
+    } else if (slot.status === 'sub_request') {
+      const timetableRef = doc(db, "artifacts", appId, "public", "data", "timetables", className);
+      const classTimetableDoc = await getDoc(timetableRef);
+      const classTimetable = parseTimetableData(classTimetableDoc.data().timetable);
+      const updatedTimetable = classTimetable.map(day => [...day]);
+      updatedTimetable[dayIndex][periodIndex] = { ...updatedTimetable[dayIndex][periodIndex], status: 'confirmed' };
+      await setDoc(timetableRef, { timetable: JSON.stringify(updatedTimetable) });
+      showMessage("Class accepted! Your timetable has been updated.", "success");
     }
+  };
+
+  const calculateTimeSlots = () => {
+    const settings = timetableSettings || { hoursPerDay, classStartTime, classDuration, breakSlots };
+    const { hoursPerDay: hpd, classStartTime: cst, classDuration: dur, breakSlots: brks } = settings;
+    if (!hpd || !cst || !dur) return [];
+    const slots = [];
+    let [startHour, startMinute] = cst.split(":").map(Number);
+    const current = new Date();
+    current.setHours(startHour, startMinute, 0, 0);
+    for (let i = 0; i < hpd; i++) {
+      const start = current.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      if ((brks || []).includes(i)) {
+        current.setMinutes(current.getMinutes() + 30);
+        slots.push('Break');
+      } else {
+        current.setMinutes(current.getMinutes() + Number(dur));
+        const end = current.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        slots.push(`${start} - ${end}`);
+      }
+    }
+    return slots;
   };
 
   const downloadTimetable = (clsName, format) => {
     const table = generatedTimetables[clsName];
-    if (!table) {
-      showMessage("No timetable available for download.", "error");
-      return;
-    }
-    const headerRow = ["Day/Period", ...Array.from({ length: hoursPerDay }, (_, i) => `Period ${i + 1}`)];
-    // PDF FIX 2: Ensure null cells are handled gracefully when preparing data.
-    const bodyRows = table.map((row, dayIdx) => [`Day ${dayIdx + 1}`, ...row.map(cell => cell ? cell.subjectName : 'N/A')]);
+    if (!table || !isLibrariesLoaded) { showMessage("Timetable or libraries not available for download.", "error"); return; }
 
-    if (format === "xlsx") {
+    const headerRow = ["Day/Period", ...(calculateTimeSlots().length ? calculateTimeSlots() : Array.from({ length: hoursPerDay }, (_, i) => `Period ${i + 1}`))];
+    const safe = (cell) => (cell ? cell.subjectName : 'N/A');
+    const bodyRows = table.map((row, dayIdx) => [`Day ${dayIdx + 1}`, ...row.map(safe)]);
+
+    if (format === 'xlsx') {
       const ws = XLSX.utils.aoa_to_sheet([headerRow, ...bodyRows]);
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, clsName);
       XLSX.writeFile(wb, `${clsName}_timetable.xlsx`);
-    } else if (format === "pdf") {
-      // PDF FIX 3: Correctly instantiate jsPDF and use the autoTable plugin.
-      const { jsPDF } = window.jspdf;
-      const doc = new jsPDF();
-      doc.text(`Timetable for ${clsName}`, 14, 15);
-      doc.autoTable({
-        head: [headerRow],
-        body: bodyRows,
-        startY: 20,
+    } else if (format === 'pdf') {
+      const { jsPDF } = window.jspdf || {};
+      const doc = jsPDF ? new jsPDF() : null;
+      if (!doc) { showMessage('PDF library not loaded.', 'error'); return; }
+      doc.setFontSize(10);
+      let y = 10;
+      const data = [headerRow, ...bodyRows];
+      data.forEach((row, rIdx) => {
+        row.forEach((cell, cIdx) => {
+          doc.text(String(cell), 10 + cIdx * 30, y + rIdx * 10);
+        });
       });
       doc.save(`${clsName}_timetable.pdf`);
-    } else if (format === "txt") {
-      const text = [headerRow, ...bodyRows].map((row) => row.join("\t")).join("\n");
-      const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
+    } else if (format === 'txt') {
+      const text = [headerRow, ...bodyRows].map(r => r.join('\t')).join('\n');
+      const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
       window.saveAs(blob, `${clsName}_timetable.txt`);
     }
-    showMessage(`Timetable downloaded as ${format.toUpperCase()}!`, "success");
+    showMessage(`Timetable downloaded as ${format.toUpperCase()}!`, 'success');
   };
 
   if (!isAuthReady || !isLibrariesLoaded) {
@@ -635,11 +656,9 @@ export default function App() {
   const isSubjectManagementEnabled = teachers.length > 0;
 
   return (
-    // CHANGE THIS LINE
     <div className="grid place-items-center min-h-screen w-full bg-neutral-900 text-white font-sans p-5">
       <div className="text-xs text-neutral-500 mb-4">User ID: {userId || 'Authenticating...'}</div>
       {message.text && (
-        // LAYOUT FIX 1: Use a template literal with a space for conditional classes.
         <div className={`fixed top-5 z-50 px-6 py-3 rounded-lg shadow-xl text-white transition-all duration-300 ${message.type === 'success' ? 'bg-green-600' : 'bg-red-600'}`}>
           {message.text}
         </div>
@@ -660,21 +679,20 @@ export default function App() {
             </button>
           </div>
 
-          {/* Data Status Section */}
+          {/* Data Status */}
           <div className="bg-neutral-800 p-6 rounded-2xl shadow-lg border border-neutral-700 mb-6">
             <h3 className="text-lg font-semibold mb-3">Data Status</h3>
             <p className="text-sm">Loaded Classes: {classes.length}</p>
             <p className="text-sm">Loaded Teachers: {teachers.length}</p>
             <p className="text-sm mt-2">
               All classes have subjects assigned: {" "}
-              {/* LAYOUT FIX 2: Use a template literal with a space for conditional classes. */}
               <span className={`font-bold ${allClassesHaveSubjects ? 'text-green-400' : 'text-red-400'}`}>
                 {allClassesHaveSubjects ? 'Yes' : 'No'}
               </span>
             </p>
           </div>
 
-          {/* Upload Data Section */}
+          {/* Upload Data */}
           <div className="bg-neutral-800 p-6 rounded-2xl shadow-lg border border-neutral-700 mb-6">
             <h3 className="text-lg font-semibold mb-3">Upload Data</h3>
             <div className="mb-4">
@@ -690,8 +708,7 @@ export default function App() {
             )}
           </div>
 
-          {/* Subject Management Section */}
-          {/* LAYOUT FIX 3: Use a template literal with a space for conditional classes. */}
+          {/* Subject Management */}
           <div className={`bg-neutral-800 p-6 rounded-2xl shadow-lg border border-neutral-700 mb-6 transition-all duration-300 ${!isSubjectManagementEnabled ? 'opacity-50 pointer-events-none' : ''}`}>
             <h3 className="text-lg font-semibold mb-3">Subject Management</h3>
             {!isSubjectManagementEnabled && (
@@ -787,40 +804,37 @@ export default function App() {
                 <input type="number" value={hoursPerDay} onChange={e => setHoursPerDay(Number(e.target.value))} className="w-24 p-2 rounded-lg bg-neutral-700 text-white border border-neutral-600 focus:outline-none focus:ring-2 focus:ring-blue-500" />
               </div>
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                <label className="text-sm font-medium">Break Slots (e.g. 3,5):</label>
-                <input type="text" placeholder="e.g. 3,5" onChange={e => setBreakSlots(e.target.value.split(",").map(s => Number(s.trim())).filter(Boolean))} className="w-full sm:w-24 p-2 rounded-lg bg-neutral-700 text-white border border-neutral-600 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                <label className="text-sm font-medium">Break Slots (comma-separated, 0-based):</label>
+                <input type="text" value={(breakSlots || []).join(',')} onChange={e => setBreakSlots(e.target.value.split(',').map(s => Number(s.trim())).filter(n => Number.isFinite(n)))} className="w-full sm:w-24 p-2 rounded-lg bg-neutral-700 text-white border border-neutral-600 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              </div>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <label className="text-sm font-medium">Class Start Time:</label>
+                <input type="time" value={classStartTime} onChange={e => setClassStartTime(e.target.value)} className="w-24 p-2 rounded-lg bg-neutral-700 text-white border border-neutral-600 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              </div>
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <label className="text-sm font-medium">Class Duration (min):</label>
+                <input type="number" value={classDuration} onChange={e => setClassDuration(Number(e.target.value))} className="w-24 p-2 rounded-lg bg-neutral-700 text-white border border-neutral-600 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              </div>
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <label className="text-sm font-medium">Free Period %:</label>
+                <input type="number" value={freePeriodPercentage} onChange={e => setFreePeriodPercentage(Number(e.target.value))} className="w-24 p-2 rounded-lg bg-neutral-700 text-white border border-neutral-600 focus:outline-none focus:ring-2 focus:ring-blue-500" min="0" max="100" />
               </div>
             </div>
           </div>
 
-          {/* LAYOUT FIX 4: Use a template literal with a space for conditional classes. */}
           <button
             className={`w-full py-3 rounded-lg font-semibold transition-colors ${isGenerateEnabled ? 'bg-green-600 hover:bg-green-700' : 'bg-neutral-600 cursor-not-allowed'}`}
             onClick={generateTimetable}
-            disabled={!isGenerateEnabled}
+            disabled={!isGenerateEnabled || isGeneratingRef.current}
           >
-            Generate Timetable
+            {isGeneratingRef.current ? 'Generating...' : 'Generate Timetable'}
           </button>
         </div>
       )}
 
-      {role === "teacher" && (
-        <Dashboard
-          role={role}
-          collegeId={collegeId}
-          onLogout={backToLogin}
-          onNavigate={handleNavigation}
-          currentView={currentView}
-          teacherTimetable={teacherTimetable}
-          generatedTimetables={generatedTimetables}
-          workingDays={workingDays}
-          hoursPerDay={hoursPerDay}
-          handleSlotToggle={handleSlotToggle}
-          downloadTimetable={downloadTimetable}
-        />
-      )}
-
-      {role === "student" && (
+      {(role === "teacher" || role === "student") && (
         <Dashboard
           role={role}
           collegeId={collegeId}
