@@ -43,10 +43,10 @@ export default function SignInPage({ onLogin }) {
       </button>
 
       {/* Glassmorphism login container */}
-      <div className="relative z-10 w-full max-w-md mx-4 p-8 rounded-3xl bg-white/5 backdrop-blur-lg border border-white/10 shadow-2xl">
+      <div className="relative z-10 w-full max-w-md mx-4 p-8 rounded-3xl bg-white/5 backdrop-blur-lg border border-white/10 shadow-2xl text-left">
         <div className="space-y-6">
           {/* Welcome text */}
-          <div className="text-center space-y-2">
+          <div className="space-y-2 text-left">
             <h1 className="text-3xl md:text-4xl font-bold text-white leading-tight">
               Welcome back !
             </h1>
